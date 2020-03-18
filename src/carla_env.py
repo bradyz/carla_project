@@ -36,7 +36,7 @@ def set_sync_mode(client, sync):
 
     settings = world.get_settings()
     settings.synchronous_mode = sync
-    settings.fixed_delta_seconds = 0.1
+    settings.fixed_delta_seconds = 1.0 / 10.0
 
     world.apply_settings(settings)
 
@@ -286,8 +286,6 @@ class CarlaEnv(object):
         self._actor_dict['player'].append(self._player)
 
     def ready(self, ticks=10):
-        self.step()
-
         for _ in range(ticks):
             self.step()
 

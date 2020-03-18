@@ -21,6 +21,7 @@ DEBUG = True
 
 def collect_episode(env, save_dir):
     save_dir.mkdir()
+
     (save_dir / 'rgb_left').mkdir()
     (save_dir / 'rgb').mkdir()
     (save_dir / 'rgb_right').mkdir()
@@ -61,21 +62,23 @@ def collect_episode(env, save_dir):
         Image.fromarray(topdown).save(save_dir / 'map' / ('%04d.png' % index))
 
     pd.DataFrame(measurements).to_csv(save_dir / 'measurements.csv', index=False)
+
     env._client.stop_recorder()
 
 
 def main():
     np.random.seed(1337)
 
-    with CarlaEnv(town='Town01') as env:
-        for episode in range(EPISODES, EPISODES+EPISODES):
-            env.reset(
-                    n_vehicles=np.random.choice([50, 100, 200]),
-                    n_pedestrians=np.random.choice([50, 100, 200]),
-                    seed=np.random.randint(0, 256))
-            env._player.set_autopilot(True)
+    for i in range(1, 8):
+        with CarlaEnv(town='Town0%s' % i) as env:
+            for episode in range(EPISODES):
+                env.reset(
+                        n_vehicles=np.random.choice([50, 100, 200]),
+                        n_pedestrians=np.random.choice([50, 100, 200]),
+                        seed=np.random.randint(0, 256))
+                env._player.set_autopilot(True)
 
-            collect_episode(env, SAVE_PATH / ('%03d' % len(list(SAVE_PATH.glob('*')))))
+                collect_episode(env, SAVE_PATH / ('%03d' % len(list(SAVE_PATH.glob('*')))))
 
 
 if __name__ == '__main__':
