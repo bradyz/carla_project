@@ -60,6 +60,52 @@ def get_augmenter():
     return seq.augment_image
 
 
+# https://github.com/guopei/PoseEstimation-FCN-Pytorch/blob/master/heatmap.py
+def gaussian(img, pt, sigma=8):
+    pt = [
+            np.clip(pt[0], sigma // 2, img.shape[1]-sigma // 2),
+            np.clip(pt[1], sigma // 2, img.shape[0]-sigma // 2)
+            ]
+
+    # Check that any part of the gaussian is in-bounds
+    ul = [int(pt[0] - 3 * sigma), int(pt[1] - 3 * sigma)]
+    br = [int(pt[0] + 3 * sigma + 1), int(pt[1] + 3 * sigma + 1)]
+
+    # If not, just return the image as is
+    # if (ul[0] > img.shape[1] or ul[1] >= img.shape[0] or
+            # br[0] < 0 or br[1] < 0):
+        # return img
+
+    # Generate gaussian
+    size = 6 * sigma + 1
+    x = np.arange(0, size, 1, float)
+    y = x[:, np.newaxis]
+    x0 = y0 = size // 2
+
+    # The gaussian is not normalized, we want the center value to equal 1
+    g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+
+    # Usable gaussian range
+    g_x = max(0, -ul[0]), min(br[0], img.shape[1]) - ul[0]
+    g_y = max(0, -ul[1]), min(br[1], img.shape[0]) - ul[1]
+
+    # Image range
+    img_x = max(0, ul[0]), min(br[0], img.shape[1])
+    img_y = max(0, ul[1]), min(br[1], img.shape[0])
+
+    img[img_y[0]:img_y[1], img_x[0]:img_x[1]] = g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+
+    return img
+
+
+def preprocess_semantic(semantic_np):
+    topdown = common.CONVERTER[semantic_np]
+    topdown = torch.LongTensor(topdown)
+    topdown = torch.nn.functional.one_hot(topdown, N_CLASSES).permute(2, 0, 1).float()
+
+    return topdown
+
+
 class CarlaDataset(Dataset):
     def __init__(self, dataset_dir, transform=transforms.ToTensor()):
         dataset_dir = Path(dataset_dir)
@@ -92,9 +138,7 @@ class CarlaDataset(Dataset):
         topdown = Image.open(path / 'map' / ('%s.png' % frame))
         topdown = topdown.crop((128, 0, 128 + 256, 256))
         topdown = np.array(topdown)
-        topdown = common.CONVERTER[topdown]
-        topdown = torch.LongTensor(topdown)
-        topdown = torch.nn.functional.one_hot(topdown, N_CLASSES).permute(2, 0, 1).float()
+        topdown = preprocess_semantic(topdown)
 
         u = np.array(self.measurements.iloc[i][['x', 'y']])
         theta = np.radians(90 + self.measurements.iloc[i]['theta'])
@@ -117,9 +161,31 @@ class CarlaDataset(Dataset):
 
         points = torch.FloatTensor(points)
         points = torch.clamp(points, 0, 256)
+
+        heatmap = np.zeros((256, 256), dtype=np.float32)
+        distance = np.linalg.norm(points[-1].round().numpy() - [128, 256])
+
+        if distance < 10:
+            gaussian(heatmap, [np.random.randint(64, 256-64), np.random.randint(32, 256-32)])
+        else:
+            try:
+                gaussian(heatmap, points[-1])
+            except:
+                print(points[-1])
+
+                gaussian(heatmap, [np.random.randint(64, 256-64), np.random.randint(32, 256-32)])
+
+        heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
         points = (points / 256) * 2 - 1
 
-        return rgb, topdown, points, meta
+        return rgb, topdown, points, heatmap, meta
+
+
+def heatmap_from_point(x, y, size=256):
+    heatmap = np.zeros((256, 256), dtype=np.float32)
+    gaussian(heatmap, (x, y))
+
+    return heatmap
 
 
 if __name__ == '__main__':
@@ -130,8 +196,9 @@ if __name__ == '__main__':
     data = CarlaDataset(sys.argv[1])
 
     for i in range(len(data)):
-        rgb, topdown, points, meta = data[i]
+        rgb, topdown, points, heatmap, meta = data[i]
 
+        _heatmap = np.uint8(heatmap.detach().cpu().squeeze().numpy() * 255)
         _rgb = np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255)
         _topdown = Image.fromarray(common.COLOR[topdown.argmax(0).detach().cpu().numpy()])
         _draw = ImageDraw.Draw(_topdown)
@@ -142,6 +209,7 @@ if __name__ == '__main__':
 
             _draw.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
+        cv2.imshow('heat', _heatmap)
         cv2.imshow('map', cv2.cvtColor(_rgb, cv2.COLOR_BGR2RGB))
         cv2.imshow('rgb', cv2.cvtColor(np.array(_topdown), cv2.COLOR_BGR2RGB))
         cv2.waitKey(10)

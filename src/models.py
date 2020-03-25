@@ -1,8 +1,20 @@
 import torch
+import pytorch_lightning as pl
 
 from torchvision.models.segmentation import deeplabv3_resnet50
 
 import torch.nn.functional as F
+
+
+class MapModel(pl.LightningModule):
+    def __init__(self, hparams):
+        super().__init__()
+
+        self.hparams = hparams
+        self.net = SegmentationModel(10, 4)
+
+    def forward(self, x):
+        return self.net(x)
 
 
 class SpatialSoftmax(torch.nn.Module):

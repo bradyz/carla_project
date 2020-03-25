@@ -2,30 +2,30 @@ import uuid
 import argparse
 import pathlib
 
-import wandb
+import numpy as np
 import torch
-import torchvision
 import pytorch_lightning as pl
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
+from PIL import Image, ImageDraw
 
 from .models import SegmentationModel
 from .dataset import get_dataset
 from . import common
 
-import numpy as np
-from PIL import Image, ImageDraw
-
 
 @torch.no_grad()
 def visualize(batch, out, loss):
+    import torchvision
+    import wandb
+
     images = list()
 
     for i in range(out.shape[0]):
         _loss = loss[i]
         _out = out[i]
-        rgb, topdown, points, meta = [x[i] for x in batch]
+        rgb, topdown, points, heatmap, meta = [x[i] for x in batch]
 
         _rgb = np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255)
         _topdown = Image.fromarray(common.COLOR[topdown.argmax(0).detach().cpu().numpy()])
@@ -63,14 +63,14 @@ class MapModel(pl.LightningModule):
         super().__init__()
 
         self.hparams = hparams
-        self.net = SegmentationModel(9, 4)
+        self.net = SegmentationModel(10, 4)
 
     def forward(self, x):
         return self.net(x)
 
     def training_step(self, batch, batch_nb):
-        img, topdown, points, meta = batch
-        out = self.forward(topdown)
+        img, topdown, points, heatmap, meta = batch
+        out = self.forward(torch.cat([topdown, heatmap], 1))
 
         loss = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
         loss_mean = loss.mean()
@@ -85,8 +85,8 @@ class MapModel(pl.LightningModule):
         return {'loss': loss_mean}
 
     def validation_step(self, batch, batch_nb):
-        img, topdown, points, meta = batch
-        out = self.forward(topdown)
+        img, topdown, points, heatmap, meta = batch
+        out = self.forward(torch.cat([topdown, heatmap], 1))
 
         loss = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
         loss_mean = loss.mean()
@@ -133,7 +133,7 @@ def main(hparams):
         resume_from_checkpoint = None
 
     trainer = pl.Trainer(
-            gpus=1, max_epochs=10,
+            gpus=1, max_epochs=hparams.max_epochs,
             resume_from_checkpoint=resume_from_checkpoint,
             logger=logger, checkpoint_callback=checkpoint_callback)
 
@@ -142,7 +142,7 @@ def main(hparams):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--max_epoch', type=int, default=50)
+    parser.add_argument('--max_epochs', type=int, default=50)
     parser.add_argument('--save_dir', type=pathlib.Path, default='checkpoints')
     parser.add_argument('--id', type=str, default=uuid.uuid4().hex)
 
