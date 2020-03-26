@@ -10,6 +10,7 @@ from torchvision import transforms
 from PIL import Image
 from numpy import nan
 
+from .converter import Converter, PIXELS_PER_WORLD
 from .dataset_wrapper import Wrap
 from . import common
 
@@ -22,7 +23,6 @@ torch.manual_seed(0)
 GAP = 1
 STEPS = 4
 N_CLASSES = len(common.COLOR)
-PIXELS_PER_WORLD = 5.5
 
 
 def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwargs):
@@ -66,7 +66,7 @@ def get_augmenter():
 
 # https://github.com/guopei/PoseEstimation-FCN-Pytorch/blob/master/heatmap.py
 def make_heatmap(size, pt, sigma=8):
-    img = np.zeros((size, size), dtype=np.float32)
+    img = np.zeros(size, dtype=np.float32)
     pt = [
             np.clip(pt[0], sigma // 2, img.shape[1]-sigma // 2),
             np.clip(pt[1], sigma // 2, img.shape[0]-sigma // 2)
@@ -115,6 +115,7 @@ class CarlaDataset(Dataset):
         self.dataset_dir = dataset_dir
         self.frames = list()
         self.measurements = pd.DataFrame([eval(x.read_text()) for x in measurements])
+        self.converter = Converter()
 
         print(dataset_dir)
 
@@ -146,8 +147,11 @@ class CarlaDataset(Dataset):
         topdown = np.array(topdown)
         topdown = preprocess_semantic(topdown)
 
-        u = np.array(self.measurements.iloc[i][['x', 'y']])
-        theta = self.measurements.iloc[i]['theta'] + np.pi / 2
+        u = np.float32(self.measurements.iloc[i][['x', 'y']])
+        theta = self.measurements.iloc[i]['theta']
+        if np.isnan(theta):
+            theta = 0.0
+        theta = theta + np.pi / 2
         R = np.array([
             [np.cos(theta), -np.sin(theta)],
             [np.sin(theta),  np.cos(theta)],
@@ -169,16 +173,20 @@ class CarlaDataset(Dataset):
         points = torch.clamp(points, 0, 256)
         points = (points / 256) * 2 - 1
 
-        command_target = self.measurements.iloc[i][['x_command', 'y_command']]
+        command_target = np.float32(self.measurements.iloc[i][['x_command', 'y_command']])
         command_target = R.T.dot(command_target - u)
         command_target *= PIXELS_PER_WORLD
         command_target += [128, 256]
         command_target = np.clip(command_target, 0, 256)
 
-        heatmap = make_heatmap(256, command_target)
+        heatmap = make_heatmap((256, 256), command_target)
         heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
 
-        return rgb, topdown, points, heatmap, meta
+        command_img = self.converter.map_to_cam(torch.FloatTensor(command_target))
+        heatmap_img = make_heatmap((144, 256), command_img)
+        heatmap_img = torch.FloatTensor(heatmap_img).unsqueeze(0)
+
+        return rgb, topdown, points, heatmap, heatmap_img, meta
 
 
 if __name__ == '__main__':
@@ -186,23 +194,39 @@ if __name__ == '__main__':
     import cv2
     from PIL import ImageDraw
 
+    for path in sorted(Path('/home/bradyzhou/data/carla/carla_challenge_curated').glob('*')):
+        data = CarlaDataset(path)
+
+        for i in range(len(data)):
+            data[i]
+
     data = CarlaDataset(sys.argv[1])
+    converter = Converter()
 
     for i in range(len(data)):
-        rgb, topdown, points, heatmap, meta = data[i]
+        rgb, topdown, points, heatmap, heatmap_img, meta = data[i]
+        points_unnormalized = (points + 1) / 2 * 256
+        points_cam = converter(points_unnormalized)
 
         _heatmap = np.uint8(heatmap.detach().cpu().squeeze().numpy() * 255)
-        _rgb = np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255)
+        _heatmap_img = np.uint8(heatmap_img.detach().cpu().squeeze().numpy() * 255)
+        _rgb = Image.fromarray(np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255))
+
         _topdown = Image.fromarray(common.COLOR[topdown.argmax(0).detach().cpu().numpy()])
-        _draw = ImageDraw.Draw(_topdown)
+        _draw_map = ImageDraw.Draw(_topdown)
+        _draw_rgb = ImageDraw.Draw(_rgb)
 
-        for x, y in points:
-            x = (x + 1) / 2 * 256
-            y = (y + 1) / 2 * 256
+        for x, y in points_unnormalized:
+            _draw_map.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
-            _draw.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
+        for x, y in converter.cam_to_map(points_cam):
+            _draw_map.ellipse((x-1, y-1, x+1, y+1), (0, 255, 0))
+
+        for x, y in points_cam:
+            _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
         cv2.imshow('heat', _heatmap)
-        cv2.imshow('map', cv2.cvtColor(_rgb, cv2.COLOR_BGR2RGB))
+        cv2.imshow('heat_img', _heatmap_img)
+        cv2.imshow('map', cv2.cvtColor(np.array(_rgb), cv2.COLOR_BGR2RGB))
         cv2.imshow('rgb', cv2.cvtColor(np.array(_topdown), cv2.COLOR_BGR2RGB))
-        cv2.waitKey(10)
+        cv2.waitKey(0)

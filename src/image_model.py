@@ -10,13 +10,15 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from PIL import Image, ImageDraw
 
+from .map_model import MapModel
 from .models import SegmentationModel
 from .dataset import get_dataset
+from .converter import Converter
 from . import common
 
 
 @torch.no_grad()
-def visualize(batch, out, loss):
+def visualize(batch, out, labels_cam, labels_map, loss):
     import torchvision
     import wandb
 
@@ -25,29 +27,46 @@ def visualize(batch, out, loss):
     for i in range(out.shape[0]):
         _loss = loss[i]
         _out = out[i]
-        rgb, topdown, points, heatmap, meta = [x[i] for x in batch]
+        _labels_cam = labels_cam[i]
+        _labels_map = labels_map[i]
+        rgb, topdown, points, heatmap, heatmap_img, meta = [x[i] for x in batch]
 
-        _rgb = np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255)
+        _rgb = Image.fromarray(np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255))
+        _draw_rgb = ImageDraw.Draw(_rgb)
+        _draw_rgb.text((5, 10), 'Loss: %.3f' % _loss)
+        _draw_rgb.text((5, 30), 'Meta: %s' % meta)
+
+        for x, y in _out:
+            x = (x + 1) / 2 * _rgb.width
+            y = (y + 1) / 2 * _rgb.height
+
+            _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (0, 255, 0))
+
+        for x, y in _labels_cam:
+            x = (x + 1) / 2 * _rgb.width
+            y = (y + 1) / 2 * _rgb.height
+
+            _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
+
         _topdown = Image.fromarray(common.COLOR[topdown.argmax(0).detach().cpu().numpy()])
-        _draw = ImageDraw.Draw(_topdown)
-        _draw.text((5, 10), 'Loss: %.3f' % _loss)
-        _draw.text((5, 30), 'Meta: %s' % meta)
+        _draw_map = ImageDraw.Draw(_topdown)
 
         for x, y in points:
             x = (x + 1) / 2 * 256
             y = (y + 1) / 2 * 256
 
-            _draw.ellipse((x-2, y-2, x+2, y+2), (0, 0, 255))
+            _draw_map.ellipse((x-2, y-2, x+2, y+2), (0, 0, 255))
 
-        for x, y in _out:
+        for x, y in _labels_map:
             x = (x + 1) / 2 * 256
             y = (y + 1) / 2 * 256
 
-            _draw.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
+            _draw_map.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
-        _topdown.thumbnail((128, 128))
+        _rgb.thumbnail((128, 128))
+        _topdown.thumbnail(_rgb.size)
 
-        image = np.array(_topdown).transpose(2, 0, 1)
+        image = np.hstack((_rgb, _topdown)).transpose(2, 0, 1)
         images.append((_loss, torch.ByteTensor(image)))
 
     images.sort(key=lambda x: x[0], reverse=True)
@@ -58,42 +77,66 @@ def visualize(batch, out, loss):
     return result
 
 
-class MapModel(pl.LightningModule):
+class ImageModel(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
 
         self.hparams = hparams
-        self.net = SegmentationModel(10, 4)
+        self.net = SegmentationModel(4, 4)
+
+        self.teacher = MapModel.load_from_checkpoint(pathlib.Path('/home/bradyzhou/code/carla_random/') / hparams.teacher_path)
+        # self.teacher.eval()
+
+        self.converter = Converter()
 
     def forward(self, x, *args, **kwargs):
         return self.net(x, *args, **kwargs)
 
-    def training_step(self, batch, batch_nb):
-        img, topdown, points, heatmap, meta = batch
-        out = self.forward(torch.cat([topdown, heatmap], 1))
+    @torch.no_grad()
+    def _get_labels(self, batch):
+        img, topdown, points, heatmap, heatmap_img, meta = batch
+        out = self.teacher.forward(torch.cat([topdown, heatmap], 1))
 
-        loss = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
+        return out
+
+    def training_step(self, batch, batch_nb):
+        img, topdown, points, heatmap, heatmap_img, meta = batch
+        labels_map = self._get_labels(batch)
+
+        labels_cam = self.converter.map_to_cam((labels_map + 1) / 2 * 256)
+        labels_cam[..., 0] = (labels_cam[..., 0] / 256) * 2 - 1
+        labels_cam[..., 1] = (labels_cam[..., 1] / 144) * 2 - 1
+
+        out = self.forward(torch.cat([img, heatmap_img], 1))
+
+        loss = torch.nn.functional.l1_loss(out, labels_cam, reduction='none').mean((1, 2))
         loss_mean = loss.mean()
 
         metrics = {'train_loss': loss_mean.item()}
 
         if batch_nb % 250 == 0:
-            metrics['train_image'] = visualize(batch, out, loss)
+            metrics['train_image'] = visualize(batch, out, labels_cam, labels_map, loss)
 
         self.logger.log_metrics(metrics, self.global_step)
 
         return {'loss': loss_mean}
 
     def validation_step(self, batch, batch_nb):
-        img, topdown, points, heatmap, meta = batch
-        out = self.forward(torch.cat([topdown, heatmap], 1))
+        img, topdown, points, heatmap, heatmap_img, meta = batch
+        labels_map = self._get_labels(batch)
+
+        labels_cam = self.converter.map_to_cam((labels_map + 1) / 2 * 256)
+        labels_cam[..., 0] = (labels_cam[..., 0] / 256) * 2 - 1
+        labels_cam[..., 1] = (labels_cam[..., 1] / 144) * 2 - 1
+
+        out = self.forward(torch.cat([img, heatmap_img], 1))
 
         loss = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
         loss_mean = loss.mean()
 
         if batch_nb == 0:
             self.logger.log_metrics({
-                'val_image': visualize(batch, out, loss)
+                'val_image': visualize(batch, out, labels_cam, labels_map, loss)
                 }, self.global_step)
 
         return {'val_loss': loss_mean.item()}
@@ -123,8 +166,8 @@ class MapModel(pl.LightningModule):
 
 
 def main(hparams):
-    model = MapModel(hparams)
-    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='topdown')
+    model = ImageModel(hparams)
+    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='distillation')
     checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=2)
 
     try:
@@ -145,6 +188,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_epochs', type=int, default=50)
     parser.add_argument('--save_dir', type=pathlib.Path, default='checkpoints')
     parser.add_argument('--id', type=str, default=uuid.uuid4().hex)
+
+    parser.add_argument('--teacher_path', type=pathlib.Path, required=True)
 
     # Data args.
     parser.add_argument('--dataset_dir', type=pathlib.Path, required=True)
