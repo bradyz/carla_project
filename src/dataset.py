@@ -8,6 +8,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 from torchvision import transforms
 from PIL import Image
+from numpy import nan
 
 from .dataset_wrapper import Wrap
 from . import common
@@ -18,9 +19,10 @@ np.random.seed(0)
 torch.manual_seed(0)
 
 # Data has frame skip of 5.
-GAP = 2
+GAP = 1
 STEPS = 4
 N_CLASSES = len(common.COLOR)
+PIXELS_PER_WORLD = 5.5
 
 
 def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwargs):
@@ -30,10 +32,12 @@ def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwa
         transforms.ToTensor()
         ])
 
-    for _dataset_dir in sorted(Path(dataset_dir).glob('*')):
+    episodes = list(sorted(Path(dataset_dir).glob('*')))
+
+    for i, _dataset_dir in enumerate(episodes):
         add = False
-        add |= (is_train and int(_dataset_dir.stem) % 10 < 8)
-        add |= (not is_train and int(_dataset_dir.stem) % 10 >= 8)
+        add |= (is_train and i % 10 < 8)
+        add |= (not is_train and i % 10 >= 8)
 
         if add:
             data.append(CarlaDataset(_dataset_dir, transform, **kwargs))
@@ -61,7 +65,8 @@ def get_augmenter():
 
 
 # https://github.com/guopei/PoseEstimation-FCN-Pytorch/blob/master/heatmap.py
-def gaussian(img, pt, sigma=8):
+def make_heatmap(size, pt, sigma=8):
+    img = np.zeros((size, size), dtype=np.float32)
     pt = [
             np.clip(pt[0], sigma // 2, img.shape[1]-sigma // 2),
             np.clip(pt[1], sigma // 2, img.shape[0]-sigma // 2)
@@ -70,11 +75,6 @@ def gaussian(img, pt, sigma=8):
     # Check that any part of the gaussian is in-bounds
     ul = [int(pt[0] - 3 * sigma), int(pt[1] - 3 * sigma)]
     br = [int(pt[0] + 3 * sigma + 1), int(pt[1] + 3 * sigma + 1)]
-
-    # If not, just return the image as is
-    # if (ul[0] > img.shape[1] or ul[1] >= img.shape[0] or
-            # br[0] < 0 or br[1] < 0):
-        # return img
 
     # Generate gaussian
     size = 6 * sigma + 1
@@ -109,20 +109,26 @@ def preprocess_semantic(semantic_np):
 class CarlaDataset(Dataset):
     def __init__(self, dataset_dir, transform=transforms.ToTensor()):
         dataset_dir = Path(dataset_dir)
+        measurements = list(sorted((dataset_dir / 'measurements').glob('*.json')))
 
         self.transform = transform
         self.dataset_dir = dataset_dir
         self.frames = list()
-        self.measurements = pd.read_csv(dataset_dir / 'measurements.csv')
+        self.measurements = pd.DataFrame([eval(x.read_text()) for x in measurements])
+
+        print(dataset_dir)
 
         for image_path in sorted((dataset_dir / 'rgb').glob('*.png')):
             frame = str(image_path.stem)
 
             assert (dataset_dir / 'rgb_left' / ('%s.png' % frame)).exists()
             assert (dataset_dir / 'rgb_right' / ('%s.png' % frame)).exists()
-            assert (dataset_dir / 'map' / ('%s.png' % frame)).exists()
+            assert (dataset_dir / 'topdown' / ('%s.png' % frame)).exists()
+            assert int(frame) < len(self.measurements)
 
             self.frames.append(frame)
+
+        assert len(self.frames) > 0, '%s has 0 frames.' % dataset_dir
 
     def __len__(self):
         return len(self.frames) - GAP * STEPS
@@ -135,13 +141,13 @@ class CarlaDataset(Dataset):
         rgb = Image.open(path / 'rgb' / ('%s.png' % frame))
         rgb = transforms.functional.to_tensor(rgb)
 
-        topdown = Image.open(path / 'map' / ('%s.png' % frame))
+        topdown = Image.open(path / 'topdown' / ('%s.png' % frame))
         topdown = topdown.crop((128, 0, 128 + 256, 256))
         topdown = np.array(topdown)
         topdown = preprocess_semantic(topdown)
 
         u = np.array(self.measurements.iloc[i][['x', 'y']])
-        theta = np.radians(90 + self.measurements.iloc[i]['theta'])
+        theta = self.measurements.iloc[i]['theta'] + np.pi / 2
         R = np.array([
             [np.cos(theta), -np.sin(theta)],
             [np.sin(theta),  np.cos(theta)],
@@ -154,38 +160,25 @@ class CarlaDataset(Dataset):
             v = np.array(self.measurements.iloc[j][['x', 'y']])
 
             target = R.T.dot(v - u)
-            target *= 5.5
+            target *= PIXELS_PER_WORLD
             target += [128, 256]
 
             points.append(target)
 
         points = torch.FloatTensor(points)
         points = torch.clamp(points, 0, 256)
-
-        heatmap = np.zeros((256, 256), dtype=np.float32)
-        distance = np.linalg.norm(points[-1].round().numpy() - [128, 256])
-
-        if distance < 10:
-            gaussian(heatmap, [np.random.randint(64, 256-64), np.random.randint(32, 256-32)])
-        else:
-            try:
-                gaussian(heatmap, points[-1])
-            except:
-                print(points[-1])
-
-                gaussian(heatmap, [np.random.randint(64, 256-64), np.random.randint(32, 256-32)])
-
-        heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
         points = (points / 256) * 2 - 1
 
+        command_target = self.measurements.iloc[i][['x_command', 'y_command']]
+        command_target = R.T.dot(command_target - u)
+        command_target *= PIXELS_PER_WORLD
+        command_target += [128, 256]
+        command_target = np.clip(command_target, 0, 256)
+
+        heatmap = make_heatmap(256, command_target)
+        heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
+
         return rgb, topdown, points, heatmap, meta
-
-
-def heatmap_from_point(x, y, size=256):
-    heatmap = np.zeros((256, 256), dtype=np.float32)
-    gaussian(heatmap, (x, y))
-
-    return heatmap
 
 
 if __name__ == '__main__':
