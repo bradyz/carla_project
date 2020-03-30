@@ -59,8 +59,6 @@ def visualize(batch, out, between, out_cmd, loss_point, loss_cmd, target_heatmap
 
             _draw.ellipse((x-1, y-1, x+1, y+1), (0, 255, 0))
 
-        _topdown.thumbnail((128, 128))
-        _draw = ImageDraw.Draw(_topdown)
         _draw.text((5, 10), 'Point: %.3f' % _loss_point)
         _draw.text((5, 30), 'Command: %.3f' % _loss_cmd)
         _draw.text((5, 50), 'Meta: %s' % meta)
@@ -126,9 +124,12 @@ class MapModel(pl.LightningModule):
         img, topdown, points, target, actions, meta = batch
         out, (target_heatmap,) = self.forward(topdown, target, debug=True)
 
-        alpha = torch.rand(out.shape).type_as(out)
+        alpha = 0.0
         between = alpha * out + (1-alpha) * points
         out_cmd = self.controller(between)
+
+        out_cmd_pred = self.controller(out)
+        loss_cmd_pred_mean = torch.nn.functional.l1_loss(out_cmd_pred, actions, reduction='none').mean(1).mean()
 
         loss_point = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
         loss_cmd = torch.nn.functional.l1_loss(out_cmd, actions, reduction='none').mean(1)
@@ -145,17 +146,17 @@ class MapModel(pl.LightningModule):
                 'val_loss': loss.item(),
                 'val_point_loss': loss_point_mean.item(),
                 'val_cmd_loss': loss_cmd_mean.item(),
+                'val_cmd_pred_loss': loss_cmd_pred_mean.item(),
                 }
 
     def validation_epoch_end(self, outputs):
-        results = {
-                'val_loss': list(),
-                'val_point_loss': list(),
-                'val_cmd_loss': list(),
-                }
+        results = dict()
 
         for output in outputs:
             for key in results:
+                if key not in results:
+                    results[key] = list()
+
                 results[key].append(output[key])
 
         summary = {key: np.mean(val) for key, val in results.items()}
