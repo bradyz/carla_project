@@ -1,20 +1,26 @@
 import torch
-import pytorch_lightning as pl
+import torch.nn.functional as F
 
 from torchvision.models.segmentation import deeplabv3_resnet50
 
-import torch.nn.functional as F
 
-
-class MapModel(pl.LightningModule):
-    def __init__(self, hparams):
+class RawController(torch.nn.Module):
+    def __init__(self, n_input=4, k=32):
         super().__init__()
 
-        self.hparams = hparams
-        self.net = SegmentationModel(10, 4)
+        self.layers = torch.nn.Sequential(
+                torch.nn.BatchNorm1d(n_input * 2),
+                torch.nn.Linear(n_input * 2, k), torch.nn.ReLU(),
+
+                torch.nn.BatchNorm1d(k),
+                torch.nn.Linear(k, k), torch.nn.ReLU(),
+
+                torch.nn.BatchNorm1d(k),
+                torch.nn.Linear(k, 2),
+                )
 
     def forward(self, x):
-        return self.net(x)
+        return self.layers(torch.flatten(x, 1))
 
 
 class SpatialSoftmax(torch.nn.Module):
@@ -35,22 +41,18 @@ class SegmentationModel(torch.nn.Module):
     def __init__(self, input_channels=3, n_steps=4, batch_norm=True, hack=False, temperature=1.0):
         super().__init__()
 
+        self.temperature = temperature
         self.hack = hack
 
-        if batch_norm:
-            self.norm = torch.nn.BatchNorm2d(input_channels)
-        else:
-            self.norm = lambda x: x
-
+        self.norm = torch.nn.BatchNorm2d(input_channels) if batch_norm else lambda x: x
         self.network = deeplabv3_resnet50(pretrained=False, num_classes=n_steps)
+        self.extract = SpatialSoftmax()
 
         old = self.network.backbone.conv1
         self.network.backbone.conv1 = torch.nn.Conv2d(
                 input_channels, old.out_channels,
                 kernel_size=old.kernel_size, stride=old.stride,
                 padding=old.padding, bias=old.bias)
-        self.extract = SpatialSoftmax()
-        self.temperature = temperature
 
     def forward(self, input, heatmap=False):
         if self.hack:

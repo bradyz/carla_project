@@ -1,3 +1,5 @@
+import sys
+
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +11,7 @@ import pandas as pd
 from PIL import Image
 
 from .carla_env import CarlaEnv
-from .common import colorize_segmentation
+from .common import COLOR
 
 
 EPISODE_LENGTH = 1000
@@ -53,7 +55,7 @@ def collect_episode(env, save_dir):
 
         if DEBUG:
             cv2.imshow('rgb', cv2.cvtColor(np.hstack((rgb_left, rgb, rgb_right)), cv2.COLOR_BGR2RGB))
-            cv2.imshow('topdown', cv2.cvtColor(colorize_segmentation(topdown), cv2.COLOR_BGR2RGB))
+            cv2.imshow('topdown', cv2.cvtColor(COLORS[topdown], cv2.COLOR_BGR2RGB))
             cv2.waitKey(1)
 
         Image.fromarray(rgb_left).save(save_dir / 'rgb_left' / ('%04d.png' % index))

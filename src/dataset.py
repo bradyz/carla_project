@@ -173,20 +173,25 @@ class CarlaDataset(Dataset):
         points = torch.clamp(points, 0, 256)
         points = (points / 256) * 2 - 1
 
-        command_target = np.float32(self.measurements.iloc[i][['x_command', 'y_command']])
-        command_target = R.T.dot(command_target - u)
-        command_target *= PIXELS_PER_WORLD
-        command_target += [128, 256]
-        command_target = np.clip(command_target, 0, 256)
+        target = np.float32(self.measurements.iloc[i][['x_command', 'y_command']])
+        target = R.T.dot(target - u)
+        target *= PIXELS_PER_WORLD
+        target += [128, 256]
+        target = np.clip(target, 0, 256)
+        target = torch.FloatTensor(target)
 
-        heatmap = make_heatmap((256, 256), command_target)
-        heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
+        # heatmap = make_heatmap((256, 256), target)
+        # heatmap = torch.FloatTensor(heatmap).unsqueeze(0)
 
-        command_img = self.converter.map_to_cam(torch.FloatTensor(command_target))
-        heatmap_img = make_heatmap((144, 256), command_img)
-        heatmap_img = torch.FloatTensor(heatmap_img).unsqueeze(0)
+        # command_img = self.converter.map_to_cam(torch.FloatTensor(target))
+        # heatmap_img = make_heatmap((144, 256), command_img)
+        # heatmap_img = torch.FloatTensor(heatmap_img).unsqueeze(0)
 
-        return rgb, topdown, points, heatmap, heatmap_img, meta
+        actions = np.float32(self.measurements.iloc[i][['steer', 'speed']])
+        actions[np.isnan(actions)] = 0.0
+        actions = torch.FloatTensor(actions)
+
+        return rgb, topdown, points, target, actions, meta
 
 
 if __name__ == '__main__':
