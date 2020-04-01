@@ -87,9 +87,9 @@ class MapModel(pl.LightningModule):
         self.net = SegmentationModel(10, 4, hack=hparams.hack, temperature=hparams.temperature)
         self.controller = RawController(4)
 
-    def forward(self, topdowm, target, debug=False):
-        target_heatmap = self.to_heatmap(target, topdowm)[:, None]
-        out = self.net(torch.cat((topdowm, target_heatmap), 1))
+    def forward(self, topdown, target, debug=False):
+        target_heatmap = self.to_heatmap(target, topdown)[:, None]
+        out = self.net(torch.cat((topdown, target_heatmap), 1))
 
         if not debug:
             return out
@@ -192,7 +192,7 @@ def main(hparams):
         resume_from_checkpoint = None
 
     trainer = pl.Trainer(
-            gpus=1, max_epochs=hparams.max_epochs,
+            gpus=-1, max_epochs=hparams.max_epochs,
             resume_from_checkpoint=resume_from_checkpoint,
             logger=logger, checkpoint_callback=checkpoint_callback)
 

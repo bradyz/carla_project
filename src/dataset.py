@@ -198,26 +198,38 @@ if __name__ == '__main__':
     import sys
     import cv2
     from PIL import ImageDraw
+    from .utils.heatmap import ToHeatmap
 
-    for path in sorted(Path('/home/bradyzhou/data/carla/carla_challenge_curated').glob('*')):
-        data = CarlaDataset(path)
+    # for path in sorted(Path('/home/bradyzhou/data/carla/carla_challenge_curated').glob('*')):
+        # data = CarlaDataset(path)
 
-        for i in range(len(data)):
-            data[i]
+        # for i in range(len(data)):
+            # data[i]
 
     data = CarlaDataset(sys.argv[1])
     converter = Converter()
+    to_heatmap = ToHeatmap()
 
     for i in range(len(data)):
-        rgb, topdown, points, heatmap, heatmap_img, meta = data[i]
+        rgb, topdown, points, target, actions, meta = data[i]
         points_unnormalized = (points + 1) / 2 * 256
         points_cam = converter(points_unnormalized)
 
-        _heatmap = np.uint8(heatmap.detach().cpu().squeeze().numpy() * 255)
-        _heatmap_img = np.uint8(heatmap_img.detach().cpu().squeeze().numpy() * 255)
-        _rgb = Image.fromarray(np.uint8(rgb.detach().cpu().numpy().transpose(1, 2, 0) * 255))
+        target_cam = converter(target)
 
-        _topdown = Image.fromarray(common.COLOR[topdown.argmax(0).detach().cpu().numpy()])
+        heatmap = to_heatmap(target[None], topdown[None]).squeeze()
+        heatmap_cam = to_heatmap(target_cam[None], rgb[None]).squeeze()
+
+        _heatmap = heatmap.cpu().squeeze().numpy() / 10.0 + 0.9
+        _heatmap_cam = heatmap_cam.cpu().squeeze().numpy() / 10.0 + 0.9
+
+        _rgb = (rgb.cpu() * 255).byte().numpy().transpose(1, 2, 0)
+        _rgb[heatmap_cam > 0.1] = 255
+        _rgb = Image.fromarray(_rgb)
+
+        _topdown = common.COLOR[topdown.argmax(0).cpu().numpy()]
+        _topdown[heatmap > 0.1] = 255
+        _topdown = Image.fromarray(_topdown)
         _draw_map = ImageDraw.Draw(_topdown)
         _draw_rgb = ImageDraw.Draw(_rgb)
 
@@ -230,8 +242,6 @@ if __name__ == '__main__':
         for x, y in points_cam:
             _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
-        cv2.imshow('heat', _heatmap)
-        cv2.imshow('heat_img', _heatmap_img)
         cv2.imshow('map', cv2.cvtColor(np.array(_rgb), cv2.COLOR_BGR2RGB))
         cv2.imshow('rgb', cv2.cvtColor(np.array(_topdown), cv2.COLOR_BGR2RGB))
         cv2.waitKey(0)
