@@ -142,6 +142,12 @@ class CarlaDataset(Dataset):
         rgb = Image.open(path / 'rgb' / ('%s.png' % frame))
         rgb = transforms.functional.to_tensor(rgb)
 
+        rgb_left = Image.open(path / 'rgb_left' / ('%s.png' % frame))
+        rgb_left = transforms.functional.to_tensor(rgb_left)
+
+        rgb_right = Image.open(path / 'rgb_right' / ('%s.png' % frame))
+        rgb_right = transforms.functional.to_tensor(rgb_right)
+
         topdown = Image.open(path / 'topdown' / ('%s.png' % frame))
         topdown = topdown.crop((128, 0, 128 + 256, 256))
         topdown = np.array(topdown)
@@ -191,7 +197,7 @@ class CarlaDataset(Dataset):
         actions[np.isnan(actions)] = 0.0
         actions = torch.FloatTensor(actions)
 
-        return rgb, topdown, points, target, actions, meta
+        return torch.cat((rgb, rgb_left, rgb_right)), topdown, points, target, actions, meta
 
 
 if __name__ == '__main__':

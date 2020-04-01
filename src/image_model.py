@@ -40,7 +40,7 @@ def viz(batch, out, out_ctrl, target_cam, lbl_cam, lbl_map, ctrl_map, point_loss
 
         img, topdown, points, _, actions, meta = [x[i] for x in batch]
 
-        _rgb = Image.fromarray((255 * img.cpu()).byte().numpy().transpose(1, 2, 0))
+        _rgb = Image.fromarray((255 * img[:3].cpu()).byte().numpy().transpose(1, 2, 0))
         _draw_rgb = ImageDraw.Draw(_rgb)
         _draw_rgb.text((5, 10), 'Point loss: %.3f' % _point_loss)
         _draw_rgb.text((5, 30), 'Control loss: %.3f' % _ctrl_loss)
@@ -98,7 +98,7 @@ class ImageModel(pl.LightningModule):
         self.teacher = MapModel.load_from_checkpoint(hparams.teacher_path)
         self.to_heatmap = ToHeatmap(hparams.heatmap_radius)
 
-        self.net = SegmentationModel(4, 4)
+        self.net = SegmentationModel(10, 4)
         self.converter = Converter()
         self.controller = RawController(4)
 
@@ -334,7 +334,7 @@ if __name__ == '__main__':
     # Model args.
     parser.add_argument('--heatmap_radius', type=int, default=5)
     parser.add_argument('--command_coefficient', type=float, default=0.1)
-    parser.add_argument('--temperature', type=float, default=1.0)
+    parser.add_argument('--temperature', type=float, default=5.0)
     parser.add_argument('--hack', action='store_true', default=False)
 
     # Data args.
