@@ -16,8 +16,7 @@ class RawController(torch.nn.Module):
                 torch.nn.Linear(k, k), torch.nn.ReLU(),
 
                 torch.nn.BatchNorm1d(k),
-                torch.nn.Linear(k, 2),
-                )
+                torch.nn.Linear(k, 2))
 
     def forward(self, x):
         return self.layers(torch.flatten(x, 1))

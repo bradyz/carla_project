@@ -105,12 +105,16 @@ class MapModel(pl.LightningModule):
         out_cmd = self.controller(between)
 
         loss_point = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
-        loss_cmd = torch.nn.functional.l1_loss(out_cmd, actions, reduction='none').mean(1)
+        loss_cmd_raw = torch.nn.functional.l1_loss(out_cmd, actions, reduction='none')
+
+        loss_cmd = loss_cmd_raw.mean(1)
         loss = (loss_point + self.hparams.command_coefficient * loss_cmd).mean()
 
         metrics = {
                 'point_loss': loss_point.mean().item(),
-                'cmd_loss': loss_cmd.mean().item()
+                'cmd_loss': loss_cmd.mean().item(),
+                'loss_steer': loss_cmd_raw[:, 0].mean().item(),
+                'loss_speed': loss_cmd_raw[:, 1].mean().item()
                 }
 
         if batch_nb % 250 == 0:
@@ -127,15 +131,14 @@ class MapModel(pl.LightningModule):
         alpha = 0.0
         between = alpha * out + (1-alpha) * points
         out_cmd = self.controller(between)
-
         out_cmd_pred = self.controller(out)
-        loss_cmd_pred_mean = torch.nn.functional.l1_loss(out_cmd_pred, actions, reduction='none').mean(1).mean()
 
         loss_point = torch.nn.functional.l1_loss(out, points, reduction='none').mean((1, 2))
-        loss_cmd = torch.nn.functional.l1_loss(out_cmd, actions, reduction='none').mean(1)
+        loss_cmd_raw = torch.nn.functional.l1_loss(out_cmd, actions, reduction='none')
+        loss_cmd_pred_raw = torch.nn.functional.l1_loss(out_cmd_pred, actions, reduction='none')
+
+        loss_cmd = loss_cmd_raw.mean(1)
         loss = (loss_point + self.hparams.command_coefficient * loss_cmd).mean()
-        loss_point_mean = loss_point.mean()
-        loss_cmd_mean = loss_cmd.mean()
 
         if batch_nb == 0:
             self.logger.log_metrics({
@@ -144,20 +147,26 @@ class MapModel(pl.LightningModule):
 
         return {
                 'val_loss': loss.item(),
-                'val_point_loss': loss_point_mean.item(),
-                'val_cmd_loss': loss_cmd_mean.item(),
-                'val_cmd_pred_loss': loss_cmd_pred_mean.item(),
+                'val_point_loss': loss_point.mean().item(),
+
+                'val_cmd_loss': loss_cmd_raw.mean(1).mean().item(),
+                'val_steer_loss': loss_cmd_raw[:, 0].mean().item(),
+                'val_speed_loss': loss_cmd_raw[:, 1].mean().item(),
+
+                'val_cmd_pred_loss': loss_cmd_pred_raw.mean(1).mean().item(),
+                'val_steer_pred_loss': loss_cmd_pred_raw[:, 0].mean().item(),
+                'val_speed_pred_loss': loss_cmd_pred_raw[:, 1].mean().item(),
                 }
 
-    def validation_epoch_end(self, outputs):
+    def validation_epoch_end(self, batch_metrics):
         results = dict()
 
-        for output in outputs:
-            for key in results:
+        for metrics in batch_metrics:
+            for key in metrics:
                 if key not in results:
                     results[key] = list()
 
-                results[key].append(output[key])
+                results[key].append(metrics[key])
 
         summary = {key: np.mean(val) for key, val in results.items()}
         self.logger.log_metrics(summary, self.global_step)
@@ -216,7 +225,7 @@ if __name__ == '__main__':
 
     # Optimizer args.
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--weight_decay', type=float, default=5e-6)
+    parser.add_argument('--weight_decay', type=float, default=0.0)
 
     parsed = parser.parse_args()
     parsed.save_dir = parsed.save_dir / parsed.id

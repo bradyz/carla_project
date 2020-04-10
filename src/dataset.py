@@ -25,6 +25,19 @@ STEPS = 4
 N_CLASSES = len(common.COLOR)
 
 
+def get_weights(data, key='theta', bins=16):
+    values = np.hstack(tuple(x.measurements[key].values[:len(x)] for x in data))
+    values[np.isnan(values)] = np.mean(values[~np.isnan(values)])
+
+    counts, edges = np.histogram(values, bins=bins)
+    class_weights = counts.sum() / counts
+    classes = np.digitize(values, edges[1:-1])
+
+    print(counts)
+
+    return class_weights[classes]
+
+
 def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwargs):
     data = list()
     transform = transforms.Compose([
@@ -36,18 +49,19 @@ def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwa
 
     for i, _dataset_dir in enumerate(episodes):
         add = False
-        add |= (is_train and i % 10 < 8)
-        add |= (not is_train and i % 10 >= 8)
+        add |= (is_train and i % 10 < 9)
+        add |= (not is_train and i % 10 >= 9)
 
         if add:
             data.append(CarlaDataset(_dataset_dir, transform, **kwargs))
 
     print('%d frames.' % sum(map(len, data)))
 
+    weights = torch.DoubleTensor(get_weights(data))
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(weights, len(weights))
     data = torch.utils.data.ConcatDataset(data)
-    data = Wrap(data, batch_size, 1000 if is_train else 100, num_workers)
 
-    return data
+    return Wrap(data, sampler, batch_size, 1000 if is_train else 100, num_workers)
 
 
 def get_augmenter():
@@ -193,7 +207,7 @@ class CarlaDataset(Dataset):
         # heatmap_img = make_heatmap((144, 256), command_img)
         # heatmap_img = torch.FloatTensor(heatmap_img).unsqueeze(0)
 
-        actions = np.float32(self.measurements.iloc[i][['steer', 'speed']])
+        actions = np.float32(self.measurements.iloc[i][['steer', 'target_speed']])
         actions[np.isnan(actions)] = 0.0
         actions = torch.FloatTensor(actions)
 
@@ -229,7 +243,7 @@ if __name__ == '__main__':
         _heatmap = heatmap.cpu().squeeze().numpy() / 10.0 + 0.9
         _heatmap_cam = heatmap_cam.cpu().squeeze().numpy() / 10.0 + 0.9
 
-        _rgb = (rgb.cpu() * 255).byte().numpy().transpose(1, 2, 0)
+        _rgb = (rgb.cpu() * 255).byte().numpy().transpose(1, 2, 0)[:, :, :3]
         _rgb[heatmap_cam > 0.1] = 255
         _rgb = Image.fromarray(_rgb)
 

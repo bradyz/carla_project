@@ -98,7 +98,7 @@ class ImageModel(pl.LightningModule):
         self.teacher = MapModel.load_from_checkpoint(hparams.teacher_path)
         self.to_heatmap = ToHeatmap(hparams.heatmap_radius)
 
-        self.net = SegmentationModel(10, 4)
+        self.net = SegmentationModel(10, 4, hack=hparams.hack, temperature=hparams.temperature)
         self.converter = Converter()
         self.controller = RawController(4)
 
