@@ -90,19 +90,19 @@ def viz(batch, out, out_ctrl, target_cam, lbl_cam, lbl_map, ctrl_map, point_loss
 
 
 class ImageModel(pl.LightningModule):
-    def __init__(self, hparams):
+    def __init__(self, hparams, teacher_path=''):
         super().__init__()
 
         self.hparams = hparams
-
-        self.teacher = MapModel.load_from_checkpoint(hparams.teacher_path)
         self.to_heatmap = ToHeatmap(hparams.heatmap_radius)
+
+        if teacher_path:
+            self.teacher = MapModel.load_from_checkpoint(teacher_path)
+            self.teacher.freeze()
 
         self.net = SegmentationModel(10, 4, hack=hparams.hack, temperature=hparams.temperature)
         self.converter = Converter()
         self.controller = RawController(4)
-
-        # self.teacher.eval()
 
     def forward(self, img, target):
         target_cam = self.converter.map_to_cam(target)
@@ -304,18 +304,27 @@ class ImageModel(pl.LightningModule):
     def val_dataloader(self):
         return get_dataset(self.hparams.dataset_dir, False, self.hparams.batch_size)
 
+    def state_dict(self):
+        return {k: v for k, v in super().state_dict().items() if 'teacher' not in k}
+
+    def load_state_dict(self, state_dict):
+        errors = super().load_state_dict(state_dict, strict=False)
+
+        print(errors)
+
 
 def main(hparams):
-    model = ImageModel(hparams)
-    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='distillation')
-    checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=2)
-
     try:
         resume_from_checkpoint = sorted(hparams.save_dir.glob('*.ckpt'))[-1]
     except:
         resume_from_checkpoint = None
 
+    model = ImageModel(hparams, teacher_path=hparams.teacher_path)
+    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='distillation')
+    checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=1)
+
     trainer = pl.Trainer(
+            # fast_dev_run=True,
             gpus=-1, max_epochs=hparams.max_epochs,
             resume_from_checkpoint=resume_from_checkpoint,
             logger=logger, checkpoint_callback=checkpoint_callback)
