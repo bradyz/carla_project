@@ -5,6 +5,8 @@ import pathlib
 import numpy as np
 import torch
 import pytorch_lightning as pl
+import torchvision
+import wandb
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -18,9 +20,6 @@ from . import common
 
 @torch.no_grad()
 def visualize(batch, out, between, out_cmd, loss_point, loss_cmd, target_heatmap):
-    import torchvision
-    import wandb
-
     images = list()
 
     for i in range(out.shape[0]):
@@ -184,10 +183,10 @@ class MapModel(pl.LightningModule):
         return [optim], [scheduler]
 
     def train_dataloader(self):
-        return get_dataset(self.hparams.dataset_dir, True, self.hparams.batch_size)
+        return get_dataset(self.hparams.dataset_dir, True, self.hparams.batch_size, sample_by=self.hparams.sample_by)
 
     def val_dataloader(self):
-        return get_dataset(self.hparams.dataset_dir, False, self.hparams.batch_size)
+        return get_dataset(self.hparams.dataset_dir, False, self.hparams.batch_size, sample_by=self.hparams.sample_by)
 
 
 def main(hparams):
@@ -215,8 +214,9 @@ if __name__ == '__main__':
     parser.add_argument('--id', type=str, default=uuid.uuid4().hex)
 
     parser.add_argument('--heatmap_radius', type=int, default=5)
+    parser.add_argument('--sample_by', type=str, choices=['none', 'speed', 'steer'], default='speed')
     parser.add_argument('--command_coefficient', type=float, default=0.1)
-    parser.add_argument('--temperature', type=float, default=1.0)
+    parser.add_argument('--temperature', type=float, default=10.0)
     parser.add_argument('--hack', action='store_true', default=False)
 
     # Data args.

@@ -5,8 +5,6 @@ import torch
 
 def _repeater(dataloader):
     for loader in repeat(dataloader):
-        print('reset')
-
         for data in loader:
             yield data
 

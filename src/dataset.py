@@ -25,7 +25,10 @@ STEPS = 4
 N_CLASSES = len(common.COLOR)
 
 
-def get_weights(data, key='theta', bins=16):
+def get_weights(data, key='speed', bins=16):
+    if key == 'none':
+        return [1 for _ in range(sum(len(x) for x in data))]
+
     values = np.hstack(tuple(x.measurements[key].values[:len(x)] for x in data))
     values[np.isnan(values)] = np.mean(values[~np.isnan(values)])
 
@@ -38,7 +41,7 @@ def get_weights(data, key='theta', bins=16):
     return class_weights[classes]
 
 
-def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwargs):
+def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, sample_by='none', **kwargs):
     data = list()
     transform = transforms.Compose([
         get_augmenter() if is_train else lambda x: x,
@@ -57,7 +60,7 @@ def get_dataset(dataset_dir, is_train=True, batch_size=128, num_workers=4, **kwa
 
     print('%d frames.' % sum(map(len, data)))
 
-    weights = torch.DoubleTensor(get_weights(data))
+    weights = torch.DoubleTensor(get_weights(data, key=sample_by))
     sampler = torch.utils.data.sampler.WeightedRandomSampler(weights, len(weights))
     data = torch.utils.data.ConcatDataset(data)
 
