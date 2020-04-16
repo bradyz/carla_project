@@ -191,8 +191,8 @@ class MapModel(pl.LightningModule):
 
 def main(hparams):
     model = MapModel(hparams)
-    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='topdown')
-    checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=2)
+    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='stage_1')
+    checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=1)
 
     try:
         resume_from_checkpoint = sorted(hparams.save_dir.glob('*.ckpt'))[-1]
@@ -206,22 +206,24 @@ def main(hparams):
 
     trainer.fit(model)
 
+    wandb.save(str(hparams.save_dir / '*.ckpt'))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--max_epochs', type=int, default=25)
+    parser.add_argument('--max_epochs', type=int, default=50)
     parser.add_argument('--save_dir', type=pathlib.Path, default='checkpoints')
     parser.add_argument('--id', type=str, default=uuid.uuid4().hex)
 
     parser.add_argument('--heatmap_radius', type=int, default=5)
-    parser.add_argument('--sample_by', type=str, choices=['none', 'speed', 'steer'], default='speed')
+    parser.add_argument('--sample_by', type=str, choices=['none', 'even', 'speed', 'steer'], default='even')
     parser.add_argument('--command_coefficient', type=float, default=0.1)
     parser.add_argument('--temperature', type=float, default=10.0)
     parser.add_argument('--hack', action='store_true', default=False)
 
     # Data args.
     parser.add_argument('--dataset_dir', type=pathlib.Path, required=True)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     # Optimizer args.
     parser.add_argument('--lr', type=float, default=1e-4)

@@ -8,7 +8,7 @@ import cv2
 from PIL import Image, ImageDraw
 
 
-data = get_dataset('/home/bradyzhou/data/carla/challenge_local/curated', False)
+data = get_dataset('/home/bradyzhou/data/carla/challenge_local/CARLA_challenge_autopilot', False)
 samples = set()
 
 for rgb, topdown, points, _, action, meta in tqdm.tqdm(data):

@@ -28,12 +28,15 @@ N_CLASSES = len(common.COLOR)
 def get_weights(data, key='speed', bins=16):
     if key == 'none':
         return [1 for _ in range(sum(len(x) for x in data))]
-
-    values = np.hstack(tuple(x.measurements[key].values[:len(x)] for x in data))
-    values[np.isnan(values)] = np.mean(values[~np.isnan(values)])
+    elif key == 'even':
+        values = np.hstack([[i for _ in range(len(x))] for i, x in enumerate(data)])
+        bins = len(data)
+    else:
+        values = np.hstack(tuple(x.measurements[key].values[:len(x)] for x in data))
+        values[np.isnan(values)] = np.mean(values[~np.isnan(values)])
 
     counts, edges = np.histogram(values, bins=bins)
-    class_weights = counts.sum() / counts
+    class_weights = counts.sum() / (counts + 1e-6)
     classes = np.digitize(values, edges[1:-1])
 
     print(counts)

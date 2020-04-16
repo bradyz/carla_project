@@ -4,7 +4,10 @@ import pathlib
 
 import numpy as np
 import torch
+import torchvision
 import pytorch_lightning as pl
+import wandb
+
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -21,9 +24,6 @@ from .scripts.cluster_points import points as RANDOM_POINTS
 
 @torch.no_grad()
 def viz(batch, out, out_ctrl, target_cam, lbl_cam, lbl_map, ctrl_map, point_loss, ctrl_loss):
-    import torchvision
-    import wandb
-
     images = list()
 
     for i in range(out.shape[0]):
@@ -299,10 +299,10 @@ class ImageModel(pl.LightningModule):
         return [optim], [scheduler]
 
     def train_dataloader(self):
-        return get_dataset(self.hparams.dataset_dir, True, self.hparams.batch_size)
+        return get_dataset(self.hparams.dataset_dir, True, self.hparams.batch_size, sample_by=self.hparams.sample_by)
 
     def val_dataloader(self):
-        return get_dataset(self.hparams.dataset_dir, False, self.hparams.batch_size)
+        return get_dataset(self.hparams.dataset_dir, False, self.hparams.batch_size, sample_by=self.hparams.sample_by)
 
     def state_dict(self):
         return {k: v for k, v in super().state_dict().items() if 'teacher' not in k}
@@ -320,16 +320,17 @@ def main(hparams):
         resume_from_checkpoint = None
 
     model = ImageModel(hparams, teacher_path=hparams.teacher_path)
-    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='distillation')
+    logger = WandbLogger(id=hparams.id, save_dir=str(hparams.save_dir), project='stage_2')
     checkpoint_callback = ModelCheckpoint(hparams.save_dir, save_top_k=1)
 
     trainer = pl.Trainer(
-            # fast_dev_run=True,
             gpus=-1, max_epochs=hparams.max_epochs,
             resume_from_checkpoint=resume_from_checkpoint,
             logger=logger, checkpoint_callback=checkpoint_callback)
 
     trainer.fit(model)
+
+    wandb.save(str(hparams.save_dir / '*.ckpt'))
 
 
 if __name__ == '__main__':
@@ -342,6 +343,7 @@ if __name__ == '__main__':
 
     # Model args.
     parser.add_argument('--heatmap_radius', type=int, default=5)
+    parser.add_argument('--sample_by', type=str, choices=['none', 'even', 'speed', 'steer'], default='even')
     parser.add_argument('--command_coefficient', type=float, default=0.1)
     parser.add_argument('--temperature', type=float, default=5.0)
     parser.add_argument('--hack', action='store_true', default=False)
