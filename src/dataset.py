@@ -268,6 +268,7 @@ if __name__ == '__main__':
         for x, y in points_cam:
             _draw_rgb.ellipse((x-2, y-2, x+2, y+2), (255, 0, 0))
 
-        cv2.imshow('map', cv2.cvtColor(np.array(_rgb), cv2.COLOR_BGR2RGB))
-        cv2.imshow('rgb', cv2.cvtColor(np.array(_topdown), cv2.COLOR_BGR2RGB))
+        _topdown.thumbnail(_rgb.size)
+
+        cv2.imshow('debug', cv2.cvtColor(np.hstack((_rgb, _topdown)), cv2.COLOR_BGR2RGB))
         cv2.waitKey(0)
