@@ -25,7 +25,7 @@ STEPS = 4
 N_CLASSES = len(common.COLOR)
 
 
-def get_weights(data, key='speed', bins=16):
+def get_weights(data, key='speed', bins=4):
     if key == 'none':
         return [1 for _ in range(sum(len(x) for x in data))]
     elif key == 'even':
