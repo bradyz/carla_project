@@ -15,9 +15,18 @@ CONVERTER = np.uint8([
     5,    # car
     0,    # wall
     0,    # traffic sign
+    0,    # sky
+    0,    # ground
+    0,    # bridge
+    0,    # railtrack
+    0,    # guardrail
+    0,    # trafficlight
+    0,    # static
+    0,    # dynamic
+    0,    # water
+    0,    # terrain
     6,
     7,
-    8,
     ])
 
 
@@ -28,7 +37,6 @@ COLOR = np.uint8([
         (128,  64, 128),    # road
         (244,  35, 232),    # sidewalk
         (  0,   0, 142),    # car
-        (255,   0,   0),
-        (255, 255,   0),
-        (  0, 255,   0),
+        (255,   0,   0),    # red light
+        (  0, 255,   0),    # green light
         ])
