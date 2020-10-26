@@ -162,7 +162,7 @@ def draw_traffic_lights(image, vehicle, lights, pixels_per_meter=5.5, size=512, 
         x, y = target
         draw.ellipse(
                 (x-radius, y-radius, x+radius, y+radius),
-                13 + light.state.real)
+                23 + light.state.real)
 
     return np.array(image)
 

@@ -27,6 +27,7 @@ CONVERTER = np.uint8([
     0,    # terrain
     6,
     7,
+    8,
     ])
 
 
@@ -38,5 +39,6 @@ COLOR = np.uint8([
         (244,  35, 232),    # sidewalk
         (  0,   0, 142),    # car
         (255,   0,   0),    # red light
+        (255, 255,   0),    # yellow light
         (  0, 255,   0),    # green light
         ])
